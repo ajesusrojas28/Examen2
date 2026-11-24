@@ -1,26 +1,44 @@
-import { ref } from 'vue';
+import { onUnmounted, ref } from 'vue';
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
+import { Network } from '@capacitor/network';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
-/**
- * TODO [M7] Capacidades nativas (6 pts en total: este archivo, PerfilPage.vue y AndroidManifest.xml).
- *
- * useConexion() devuelve { conectado, tipo }:
- *   - Valor inicial con Network.getStatus()                       (@capacitor/network)
- *   - Se actualiza solo con Network.addListener('networkStatusChange', ...)
- *   - El oyente se libera (handle.remove()) cuando se destruye la página que lo usa (onUnmounted).
- *   Las páginas Equipos y Formulario ya muestran el aviso "Sin conexión" y deshabilitan Guardar con `conectado`.
- */
 export function useConexion() {
   const conectado = ref(true);
   const tipo = ref('unknown');
-  // TODO [M7]
+
+  let handle: PluginListenerHandle | null = null;
+  let destruido = false;
+
+  // Valor inicial
+  Network.getStatus()
+    .then((estado) => {
+      conectado.value = estado.connected;
+      tipo.value = estado.connectionType;
+    })
+    .catch(() => {});
+
+  // Se mantiene actualizado mientras la página exista
+  Network.addListener('networkStatusChange', (estado) => {
+    conectado.value = estado.connected;
+    tipo.value = estado.connectionType;
+  }).then((h) => {
+    // Si la página ya se destruyó antes de que el oyente quedara registrado, se libera de inmediato
+    if (destruido) h.remove();
+    else handle = h;
+  });
+
+  // Liberar el oyente al destruir la página que usa el composable
+  onUnmounted(() => {
+    destruido = true;
+    handle?.remove();
+  });
+
   return { conectado, tipo };
 }
 
-/**
- * TODO [M7] vibrar(): vibración breve de confirmación con Haptics.impact({ style: ImpactStyle.Light })
- *   (@capacitor/haptics). En el navegador NO debe hacer nada: use Capacitor.isNativePlatform().
- *   Se llama después de guardar y de eliminar con éxito.
- */
 export async function vibrar() {
-  // TODO [M7]
+  // En el navegador no hay vibración nativa: no hace nada
+  if (!Capacitor.isNativePlatform()) return;
+  await Haptics.impact({ style: ImpactStyle.Light });
 }

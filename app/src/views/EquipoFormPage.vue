@@ -96,30 +96,85 @@ const listaCategorias = ref<Categoria[]>([]);
 const estadoActual = ref<Estado>('disponible');
 const errores = ref<Record<string, string>>({});
 
-/**
- * TODO [M5] Al entrar a la página:
- *  - Cargar las categorías para el ion-select (categorias()).
- *  - Nuevo: dejar el formulario vacío con vacio().
- *  - Edición: obtener(id) y llenar datos. Guarde el estado actual en estadoActual.
- *    costo_interno queda en null: la API no lo devuelve (EquipoResource lo oculta).
- *  - 404 → toast y volver a /tabs/equipos.
- */
+// [M5] Carga al entrar a la página: categorías y, en edición, el equipo
 onIonViewWillEnter(async () => {
   errores.value = {};
-  void [categorias, obtener, listaCategorias, estadoActual, ionRouter];
+  try {
+    // Categorías y, si es edición, el equipo, en paralelo
+    const [cats, equipo] = await Promise.all([categorias(), id ? obtener(id) : Promise.resolve(null)]);
+    listaCategorias.value = cats;
+
+    if (equipo) {
+      estadoActual.value = equipo.estado;
+      Object.assign(datos, {
+        codigo: equipo.codigo,
+        nombre: equipo.nombre,
+        categoria_id: equipo.categoria.id,
+        // Si está prestado el campo estado no se envía ni se muestra
+        estado: equipo.estado === 'prestado' ? undefined : equipo.estado,
+        fecha_adquisicion: equipo.fecha_adquisicion.slice(0, 10),
+        costo_interno: null, // la API no lo devuelve: la persona lo vuelve a ingresar
+      });
+    } else {
+      estadoActual.value = 'disponible';
+      Object.assign(datos, vacio());
+    }
+  } catch (e) {
+    if (e instanceof ErrorApi && e.status === 404) {
+      await mostrarToast('El equipo ya no existe.', 'warning');
+      ionRouter.navigate('/tabs/equipos', 'back', 'replace');
+    } else {
+      await mostrarToast('No se pudo cargar el formulario.', 'danger');
+    }
+  }
 });
 
-/**
- * TODO [M5] guardar()
- *  1. Mostrar loadingController ("Guardando…") y cerrarlo SIEMPRE, salga bien o mal.
- *  2. Enviar el cuerpo con código en mayúscula y sin espacios sobrantes, y costo_interno como número.
- *     Si el equipo está prestado, no envíe el campo estado.
- *  3. Nuevo → crear(); edición → actualizar(id).
- *  4. Éxito: vibrar() [M7], toast y volver a la lista con useIonRouter (back si se puede).
- *  5. 422 → mostrar el primer mensaje de cada campo debajo de su campo (error.erroresPorCampo).
- *     404 → toast "El equipo ya no existe."   ·   otros → toast genérico.
- */
+// [M5] Guardar (crear o actualizar)
 async function guardar() {
-  void [loadingController, actualizar, crear, ErrorApi, mostrarToast, vibrar];
+  errores.value = {};
+
+  // 1. Loading que SIEMPRE se cierra (finally)
+  const cargador = await loadingController.create({ message: 'Guardando…' });
+  await cargador.present();
+
+  let exito = false;
+  try {
+    // 2. Cuerpo: código en mayúscula y sin espacios, costo como número
+    const costo = datos.costo_interno as unknown as string | number | null;
+    const cuerpo: DatosEquipo = {
+      codigo: datos.codigo.trim().toUpperCase(),
+      nombre: datos.nombre.trim(),
+      categoria_id: datos.categoria_id,
+      fecha_adquisicion: datos.fecha_adquisicion,
+      costo_interno: String(costo ?? '').trim() === '' ? null : Number(costo),
+    };
+    // Si el equipo está prestado, no se envía el campo estado
+    if (estadoActual.value !== 'prestado') cuerpo.estado = datos.estado;
+
+    // 3. Nuevo → crear; edición → actualizar
+    if (id) await actualizar(id, cuerpo);
+    else await crear(cuerpo);
+    exito = true;
+  } catch (e) {
+    if (e instanceof ErrorApi && e.status === 422) {
+      // 5. Primer mensaje de cada campo, debajo de su campo
+      errores.value = e.erroresPorCampo;
+      await mostrarToast('Revise los campos marcados.', 'warning');
+    } else if (e instanceof ErrorApi && e.status === 404) {
+      await mostrarToast('El equipo ya no existe.', 'warning');
+    } else {
+      await mostrarToast('No se pudo guardar el equipo.', 'danger');
+    }
+  } finally {
+    await cargador.dismiss();
+  }
+
+  // 4. Éxito: vibrar, toast y volver a la lista
+  if (exito) {
+    await vibrar();
+    await mostrarToast(id ? 'Equipo actualizado.' : 'Equipo creado.', 'success');
+    if (ionRouter.canGoBack()) ionRouter.back();
+    else ionRouter.navigate('/tabs/equipos', 'back', 'replace');
+  }
 }
 </script>

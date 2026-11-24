@@ -31,8 +31,20 @@ const router = createRouter({ history: createWebHistory(import.meta.env.BASE_URL
  *  Use to.matched para revisar también la ruta padre (/tabs/).
  */
 router.beforeEach(async (to) => {
-  void [to, useAuth];
-  // TODO [M3]
+  const { cargarToken, estaAutenticado } = useAuth();
+
+  // 1. Restaurar la sesión guardada (solo la primera vez hace trabajo)
+  await cargarToken();
+
+  // 2. Si el destino o su padre (/tabs/) exigen sesión y no hay → /login
+  if (to.matched.some((ruta) => ruta.meta.requiereSesion) && !estaAutenticado.value) {
+    return '/login';
+  }
+
+  // 3. Quien ya tiene sesión no necesita ver /login
+  if (to.meta.soloInvitados && estaAutenticado.value) {
+    return '/tabs/equipos';
+  }
 });
 
 export default router;
